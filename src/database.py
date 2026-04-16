@@ -1,17 +1,14 @@
-from pathlib import Path
 from typing import Generator
 
-import yaml
 from sqlmodel import Session, SQLModel, create_engine
 
+from src.config import load_config
 from src import models  # noqa: F401 - ensures SQLModel metadata is registered
 
 
 def _load_database_url() -> str:
     """Load the database URL from configs/config.yaml."""
-    config_path = Path(__file__).resolve().parent.parent / "configs" / "config.yaml"
-    with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+    config = load_config()
     return str(config["database"]["url"])
 
 

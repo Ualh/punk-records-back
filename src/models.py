@@ -1,7 +1,18 @@
 from datetime import datetime
 from typing import Optional
 
+from pydantic import ConfigDict
 from sqlmodel import Field, SQLModel
+
+
+class SourceCreate(SQLModel):
+    """Payload for creating a source without client-managed fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    type: str
+    file_path: Optional[str] = None
 
 
 class Source(SQLModel, table=True):
@@ -12,6 +23,18 @@ class Source(SQLModel, table=True):
     type: str  # pdf | note | voice | handwritten
     file_path: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.now)
+
+
+class AtomCreate(SQLModel):
+    """Payload for creating an atom without client-managed fields."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: int
+    concept: str
+    explanation: str
+    tags: list[str] = Field(default_factory=list)
+    atom_type: str = "knowledge"
 
 
 class Atom(SQLModel, table=True):
