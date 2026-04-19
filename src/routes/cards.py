@@ -1,10 +1,12 @@
+import json
 from datetime import datetime
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, SQLModel, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Field, Session, SQLModel, select
 
 from src.database import get_session
-from src.models import Card
+from src.models import Atom, Card, Source
 from src.sm2 import sm2
 
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -14,10 +16,70 @@ class ReviewPayload(SQLModel):
     quality: int
 
 
-@router.get("", response_model=list[Card])
-def list_cards(session: Session = Depends(get_session)) -> list[Card]:
-    """List all cards."""
-    return list(session.exec(select(Card)).all())
+class CardSummary(SQLModel):
+    """Card payload enriched with atom and source metadata."""
+
+    id: int
+    atom_id: int
+    source_id: int
+    front: str
+    back: str
+    interval: int
+    ease_factor: float
+    repetitions: int
+    next_review: datetime
+    source_title: str
+    atom_concept: str
+    tags: list[str] = Field(default_factory=list)
+
+
+def _parse_tags(raw_tags: str) -> list[str]:
+    """Decode JSON-encoded atom tags safely for API responses."""
+    try:
+        parsed = json.loads(raw_tags)
+    except json.JSONDecodeError:
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    return [tag for tag in parsed if isinstance(tag, str)]
+
+
+@router.get("", response_model=list[CardSummary])
+def list_cards(
+    source_id: Optional[int] = Query(default=None),
+    session: Session = Depends(get_session),
+) -> list[CardSummary]:
+    """List cards, optionally filtered by source, with metadata for UI views."""
+    statement = (
+        select(Card, Atom, Source)
+        .join(Atom, Card.atom_id == Atom.id)
+        .join(Source, Atom.source_id == Source.id)
+        .order_by(Card.next_review)
+    )
+
+    if source_id is not None:
+        statement = statement.where(Source.id == source_id)
+
+    rows = session.exec(statement).all()
+    return [
+        CardSummary(
+            id=card.id,
+            atom_id=card.atom_id,
+            source_id=atom.source_id,
+            front=card.front,
+            back=card.back,
+            interval=card.interval,
+            ease_factor=card.ease_factor,
+            repetitions=card.repetitions,
+            next_review=card.next_review,
+            source_title=source.title,
+            atom_concept=atom.concept,
+            tags=_parse_tags(atom.tags),
+        )
+        for card, atom, source in rows
+    ]
 
 
 @router.post("", response_model=Card)

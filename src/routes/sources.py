@@ -3,14 +3,27 @@ from uuid import uuid4
 
 import requests
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlmodel import Session, select
+from sqlmodel import Field, Session, SQLModel, func, select
 
 from src.config import load_config
 from src.database import get_session
 from src.ingestion.pipeline import ingest_pdf
-from src.models import Source, SourceCreate
+from src.models import Atom, Card, Source, SourceCreate
 
 router = APIRouter(prefix="/sources", tags=["sources"])
+
+
+class SourceSummary(SQLModel):
+    """Source payload enriched with aggregate study counters."""
+
+    id: int
+    title: str
+    type: str
+    file_path: str | None = None
+    created_at: str
+    atom_count: int
+    card_count: int
+    tags: list[str] = Field(default_factory=list)
 
 
 def _serialize_source(source: Source) -> dict:
@@ -24,10 +37,38 @@ def _serialize_source(source: Source) -> dict:
     }
 
 
-@router.get("", response_model=list[Source])
-def list_sources(session: Session = Depends(get_session)) -> list[Source]:
-    """List all sources in the vault."""
-    return list(session.exec(select(Source)).all())
+@router.get("", response_model=list[SourceSummary])
+def list_sources(session: Session = Depends(get_session)) -> list[SourceSummary]:
+    """List all sources with atom and card counters for UI summaries."""
+    sources = list(session.exec(select(Source)).all())
+    summaries: list[SourceSummary] = []
+
+    for source in sources:
+        if source.id is None:
+            continue
+
+        atom_count = session.exec(
+            select(func.count(Atom.id)).where(Atom.source_id == source.id)
+        ).one()
+        card_count = session.exec(
+            select(func.count(Card.id)).where(
+                Card.atom_id.in_(select(Atom.id).where(Atom.source_id == source.id))
+            )
+        ).one()
+        summaries.append(
+            SourceSummary(
+                id=source.id,
+                title=source.title,
+                type=source.type,
+                file_path=source.file_path,
+                created_at=source.created_at.isoformat(),
+                atom_count=int(atom_count or 0),
+                card_count=int(card_count or 0),
+                tags=[],
+            )
+        )
+
+    return summaries
 
 
 @router.post("", response_model=Source)
